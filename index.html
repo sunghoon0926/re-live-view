@@ -16,18 +16,42 @@
       font: 14px/1.2 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
     }
     .control h1{ font-size:14px; margin:0 0 8px; font-weight:700; }
-    .control .row{ display:flex; gap:10px; align-items:center; margin-top:6px; flex-wrap:wrap; }
+    .control .row{ display:flex; justify-content: space-between; gap:10px; align-items:center; margin-top:6px; flex-wrap:wrap; }
     .control input[type="file"]{ font-size:12px; }
+    #colorMode { font-size:14px; padding: 0 6px;}
     .control button{
       appearance:none; border:1px solid #e2e8f0; background:#0ea5e9; color:#fff;
       padding:6px 10px; border-radius:8px; cursor:pointer; font-weight:700;
     }
     .control button:disabled{ background:#94a3b8; cursor:not-allowed; }
     .control .chk { display:flex; align-items:center; gap:6px; padding:6px 10px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; }
-    .control .slider-wrap{ display:flex; justify-content: space-between; align-items:center; gap:8px; padding:6px 8px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; }
-    .control .slider-wrap label{ background:transparent; color:#0f172a; border:0; padding:0; font-weight:800; }
-    .control input[type="range"]{ width:360px; accent-color:#0ea5e9; }
-    .control .val{ min-width:56px; text-align:right; font-weight:800; color:#0f172a; }
+    .control .slider-wrap{
+      display:flex;
+      align-items:center;
+      justify-content:flex-start; /* space-between 제거 */
+      gap:4px;                    /* 필요시 2px까지 더 줄여도 OK */
+      padding:4px 6px;            /* 패딩도 살짝 축소 */
+      border:1px solid #e2e8f0;
+      border-radius:10px;
+      background:#fff;
+    }
+    .control .slider-wrap label{
+      background:transparent; color:#0f172a; border:0; padding:0; font-weight:800;
+      margin-right:4px; /* 라벨과 슬라이더도 살짝만 띄움 */
+    }
+    .control input[type="range"]{
+      flex:1 1 auto;    /* 가용폭을 슬라이더가 다 먹음 */
+      width:auto;       /* 고정 폭 제거 */
+      min-width:0;
+      margin:0;         /* 브라우저 기본 여백 제거 */
+      accent-color:#0ea5e9;
+    }
+    .control .val{
+      flex:0 0 auto;
+      min-width:3.2ch;                  /* “96.5×” 같은 숫자 폭만 확보 */
+      text-align:right; font-weight:800; color:#0f172a;
+      font-variant-numeric: tabular-nums; /* 숫자 폭 일정 → 덜 흔들림 */
+    }
 
     .marker-pill{
       position:relative; display:inline-flex; align-items:center; gap:6px;
@@ -72,10 +96,26 @@
     .ovr-legend .dot{ display:inline-block; width:10px; height:10px; border-radius:50%; background:#0ea5e9; outline:0.5px solid #1f2937; }
 
     @media screen and (max-width: 640px) {
+      html, body { margin: 0; }
+      #gpxFile {width: 200px;}
+      #playBtn {width: 85px; }
+
       .control{
-        left:10px;
-        padding:10px 10px;
-        border-radius:5px;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;               /* ← 좌우로 늘려 폭을 꽉 채움 */
+        width: auto;            /* left+right 지정 시 남는 너비 채우기 */
+        max-width: none;        /* 데스크톱 max-width 무력화 */
+        box-sizing: border-box; /* 패딩 포함하여 100% 계산 */
+        padding: 10px
+                calc(10px + env(safe-area-inset-right))
+                10px
+                calc(10px + env(safe-area-inset-left)); /* iPhone 노치 여백 */
+        border-radius: 0;
+        /* 필요 시 그림자 때문에 여백처럼 보이면 아래 줄로 제거/완화
+          box-shadow: none;
+        */
       }
 
       .control .row{
@@ -85,6 +125,9 @@
         border:0;                 /* row에 걸린 보더도 제거 */
       }
 
+      .control .slider-wrap{ gap:3px; padding:3px 6px; }
+      .control .val{ min-width:3ch; }   /* 숫자 폭 더 줄이기 */
+
       .control .chk,
       .control .slider-wrap  {
         padding: 0 ;
@@ -93,11 +136,15 @@
         outline:0;
       }
       #fitBtn{ display:none; }
-      .control input[type="range"]{ max-width: 300px; }
       .control button{ padding:3px 8px; font-size:13px; font-weight:500; }
+      #colorMode {font-size: 13px; padding: 1px 4px ;}
+
+      .hud{
+        /* 기존: translate(-50%, calc(-100% - 44px)) 였다면 살짝만 줄 조정 */
+        transform: translate(-50%, calc(-100% - 36px));
+        font-size: 13px;
+      }
     }
-
-
   </style>
 </head>
 <body>
@@ -114,19 +161,17 @@
       <label class="chk"><input type="checkbox" id="optRealSpeed"> 실제 주행속도 적용</label>
       <label class="chk"><input type="checkbox" id="optSpeedCtl" checked> 배속 조정</label>
       <!-- ★ 추가: 경로 색상 모드 -->
-      <div class="row">
-        <label class="chk" style="gap:8px; border:0; background:transparent; padding:0;">
-            <span style="font-weight:800;">경로 색상</span>
-            <select id="colorMode" style="padding:6px 10px; border:1px solid #e2e8f0; border-radius:8px;">
-                <option value="mono">단색(기본)</option>
-                <option value="ele">고도</option>
-                <option value="spd">속도</option>
-                <option value="hr">심박</option>
-                <option value="cad">케이던스</option>
-                <option value="pwr">파워</option>
-            </select>
-        </label>
-      </div>
+      <label class="chk">
+          <span >경로 색상</span>
+          <select id="colorMode">
+              <option value="mono">단색(기본)</option>
+              <option value="ele">고도</option>
+              <option value="spd">속도</option>
+              <option value="hr">심박</option>
+              <option value="cad">케이던스</option>
+              <option value="pwr">파워</option>
+          </select>
+      </label>
     </div>
 
     <div class="row slider-wrap">
@@ -176,11 +221,11 @@
     let gradientGroup = null;   // 세그먼트 폴리라인을 담는 그룹
     let colorModeEl   = null;   // 드롭다운 엘리먼트
     let statRange = {           // 컬러 스케일용 최소/최대값
-    ele: {min:NaN, max:NaN},
-    spd: {min:NaN, max:NaN},
-    hr : {min:NaN, max:NaN},
-    cad: {min:NaN, max:NaN},
-    pwr: {min:NaN, max:NaN},
+      ele: {min:NaN, max:NaN},
+      spd: {min:NaN, max:NaN},
+      hr : {min:NaN, max:NaN},
+      cad: {min:NaN, max:NaN},
+      pwr: {min:NaN, max:NaN},
     };
 
 
@@ -522,12 +567,13 @@
       const dx  = b.lng - a.lng;
       marker.setIcon(Math.abs(dx) >= 1e-12 ? (dx >= 0 ? iconRight : iconLeft) : ((b.lat - a.lat) >= 0 ? iconRight : iconLeft));
 
+      // ▶ 스무딩 시리즈를 사용 중이면 eleS/hrS/cadS/pwrS 우선(없으면 원시값)
       const elev = lerpNum(a.eleS ?? a.ele, b.eleS ?? b.ele, segT);
       const hr   = lerpNum(a.hrS  ?? a.hr,  b.hrS  ?? b.hr,  segT);
       const cad  = lerpNum(a.cadS ?? a.cad, b.cadS ?? b.cad, segT);
       const pwr  = lerpNum(a.pwrS ?? a.pwr, b.pwrS ?? b.pwr, segT);
 
-      // 속도: 스무딩 우선 → 세그먼트 → 태그 평균 폴백
+      // ▶ 속도: 스무딩 spdS → 세그먼트 → 태그평균 폴백
       let spd = lerpNum(a.spdS, b.spdS, segT);
       if (!isFinite(spd)) {
         spd = segmentKmh(a,b);
@@ -540,16 +586,48 @@
       const timeTxt = isFinite(currentAbsMs) ? msToClock(currentAbsMs) : "—";
       updateHud(spd, hr, elev, cad, pwr, timeTxt, distMetersNow);
 
-      // ★ 현재 렌더된 절대 시각을 저장(시간 모드 재개 시 복원용)
       if (isFinite(currentAbsMs)) lastAbsMs = currentAbsMs;
 
-      map.setView([lat,lng], map.getZoom(), { animate:false });
-      const c = map.getCenter();
-      marker.setLatLng(c);
-      hudMarker.setLatLng(c);
+      // ▼▼▼ 여기부터 '모바일만' 중심 Y 오프셋 적용 ▼▼▼
+      if (isMobileNarrow()){
+        const oy = getMobileYOffsetPx();     // 상단 control 높이 + 여유
+        const z  = map.getZoom();
+        // (lat,lng)를 기준으로 화면상 '아래'로 보이도록 지도 중심을 위로 oy픽셀만큼 이동
+        // project/unproject는 뷰 상태와 무관하게 정확한 픽셀 좌표 변환 제공
+        const p  = map.project([lat, lng], z);
+        const p2 = L.point(p.x, p.y - oy);   // 중심을 위로 올리면 아이콘/HUD는 아래로
+        const centerLL = map.unproject(p2, z);
+        map.setView(centerLL, z, { animate:false });
+
+        // 아이콘/HUD는 실제 위치(lat,lng)에 놓음 → 화면상 control 아래로 내려옴
+        marker.setLatLng([lat, lng]);
+        hudMarker.setLatLng([lat, lng]);
+      } else {
+        // 데스크톱/태블릿 등은 종전 로직 유지(정중앙)
+        map.setView([lat,lng], map.getZoom(), { animate:false });
+        marker.setLatLng([lat, lng]);
+        hudMarker.setLatLng([lat, lng]);
+      }
+      // ▲▲▲ 모바일 전용 오프셋 적용 끝 ▲▲▲
 
       if (miniMarker) miniMarker.setLatLng([lat, lng]);
     }
+
+
+    // === 모바일 뷰에서 상단 control과 겹치지 않도록 지도 중심 Y 오프셋 ===
+    function isMobileNarrow(){
+      return window.matchMedia("(max-width: 640px)").matches;
+    }
+    function getMobileYOffsetPx(){
+      // .control 높이에 추가 마진(12~16px) 더하기
+      const ctrl = document.querySelector('.control');
+      const h = ctrl ? ctrl.getBoundingClientRect().bottom : 64; // control 높이(없으면 기본값)
+      return Math.round(h + 14); // 살짝 여유 마진
+    }
+
+
+
+
 
     // ───────── 파서/유틸 ─────────
     function parseGpxPoints(gpxText){
