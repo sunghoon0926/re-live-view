@@ -2,8 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>GPX ReLiveView</title>
-
+  <title>Leaflet + OSM + GPX (버튼 통합 + 옵션 + 오버뷰 + 뒤로가기)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -523,14 +522,23 @@
       const dx  = b.lng - a.lng;
       marker.setIcon(Math.abs(dx) >= 1e-12 ? (dx >= 0 ? iconRight : iconLeft) : ((b.lat - a.lat) >= 0 ? iconRight : iconLeft));
 
-      const elev = lerpNum(a.ele,b.ele,segT);
-      const hr   = lerpNum(a.hr, b.hr, segT);
-      const cad  = lerpNum(a.cad,b.cad,segT);
-      const pwr  = lerpNum(a.pwr,b.pwr,segT);
-      const spd  = segmentKmh(a,b);
+      const elev = lerpNum(a.eleS ?? a.ele, b.eleS ?? b.ele, segT);
+      const hr   = lerpNum(a.hrS  ?? a.hr,  b.hrS  ?? b.hr,  segT);
+      const cad  = lerpNum(a.cadS ?? a.cad, b.cadS ?? b.cad, segT);
+      const pwr  = lerpNum(a.pwrS ?? a.pwr, b.pwrS ?? b.pwr, segT);
+
+      // 속도: 스무딩 우선 → 세그먼트 → 태그 평균 폴백
+      let spd = lerpNum(a.spdS, b.spdS, segT);
+      if (!isFinite(spd)) {
+        spd = segmentKmh(a,b);
+        if (!isFinite(spd)) {
+          const avg = lerpNum(a.spdKmh, b.spdKmh, 0.5);
+          if (isFinite(avg)) spd = avg;
+        }
+      }
 
       const timeTxt = isFinite(currentAbsMs) ? msToClock(currentAbsMs) : "—";
-      updateHud(spd, hr, elev, cad, pwr, timeTxt, distMetersNow); // ★ 누적거리 포함
+      updateHud(spd, hr, elev, cad, pwr, timeTxt, distMetersNow);
 
       // ★ 현재 렌더된 절대 시각을 저장(시간 모드 재개 시 복원용)
       if (isFinite(currentAbsMs)) lastAbsMs = currentAbsMs;
@@ -565,8 +573,12 @@
           const cad = firstNumber(pt, ["cad","cadence","gpxtpx:cad","ns3:cad"]);
           const pwr = firstNumber(pt, ["power","Power","gpxtpx:power","ns3:power","watts","ns3:watts"]);
 
+          // ★ 추가: speed(m/s) → km/h로 변환하여 보관
+          const spdRaw = firstNumber(pt, ["speed","gpxtpx:speed","ns3:speed"]); // 보통 m/s
+          const spdKmh = isFinite(spdRaw) ? spdRaw * 3.6 : NaN;
+
           // ★ 원본 인덱스를 보존해 시간 모드에서 누적거리 계산에 사용
-          out.push({ lat,lng,timeMs,ele,hr,cad,pwr, idx: out.length });                  // ★ 변경
+          out.push({ lat,lng,timeMs,ele,hr,cad,pwr, spdKmh, idx: out.length });
         }
       }catch(e){ console.warn("[GPX] 파싱 실패:", e); }
       return out;
@@ -691,8 +703,9 @@
     function lerpNum(a,b,t){ const A=Number(a), B=Number(b); if (isFinite(A)&&isFinite(B)) return A+(B-A)*t; if (isFinite(A)) return A; if (isFinite(B)) return B; return NaN; }
     function segmentKmh(a,b){ const dt=(b.timeMs-a.timeMs)/1000; if (!isFinite(dt)||dt<=0) return NaN; const d=L.latLng(a.lat,a.lng).distanceTo(L.latLng(b.lat,b.lng)); return (d/dt)*3.6; }
     function firstNumber(el,names){
-      for (const n of names){ const e=el.getElementsByTagName(n)[0]; if (e && e.textContent!=null){ const v=parseFloat(e.textContent.trim()); if (isFinite(v)) return v; } }
-      const candidates=new Set(["hr","cad","cadence","power","watts"]);
+      for (const n of names){ /* 생략 */ }
+      // ★ 네임스페이스/대소문자 상관없이 <…:speed>도 잡히도록 보강
+      const candidates=new Set(["speed","hr","cad","cadence","power","watts"]);
       const all=el.getElementsByTagName("*");
       for (let i=0;i<all.length;i++){
         const node=all[i]; const local=(node.localName||node.nodeName||"").toLowerCase();
@@ -701,11 +714,14 @@
       return NaN;
     }
 
+
     // ★ 값 → 0~1 정규화
     function norm01(v, min, max){
-        if (!isFinite(v) || !isFinite(min) || !isFinite(max) || max <= min) return NaN;
-        return Math.min(1, Math.max(0, (v - min) / (max - min)));
+      if (!isFinite(v) || !isFinite(min) || !isFinite(max)) return NaN;
+      if (max <= min) return 0.5; // 분포가 한 점에 모이면 중간색으로 표시(회색 방지)
+      return Math.min(1, Math.max(0, (v - min) / (max - min)));
     }
+
 
     // ★ 0~1를 HSL 그라데이션으로 변환(파랑→청록→초록→노랑→주황→빨강)
     function hueRamp01(t){
@@ -716,50 +732,141 @@
 
     // ★ 모드별 값 추출(세그먼트 a->b, segT는 사용 안 해도 됨)
     function metricValue(mode, a, b){
-        switch(mode){
-            case 'ele': return (isFinite(a.ele)||isFinite(b.ele)) ? lerpNum(a.ele, b.ele, 0.5) : NaN;
-            case 'hr' : return (isFinite(a.hr) ||isFinite(b.hr )) ? lerpNum(a.hr , b.hr , 0.5) : NaN;
-            case 'cad': return (isFinite(a.cad)||isFinite(b.cad)) ? lerpNum(a.cad, b.cad, 0.5) : NaN;
-            case 'pwr': return (isFinite(a.pwr)||isFinite(b.pwr)) ? lerpNum(a.pwr, b.pwr, 0.5) : NaN;
-            case 'spd': {
-            const v = segmentKmh(a,b);
-            return isFinite(v) ? v : NaN;
+      switch(mode){
+        case 'ele': return (isFinite(a.eleS)||isFinite(b.eleS)) ? lerpNum(a.eleS, b.eleS, 0.5) : NaN;
+        case 'hr' : return (isFinite(a.hr) ||isFinite(b.hr )) ? lerpNum(a.hrS ?? a.hr,  b.hrS ?? b.hr,  0.5) : NaN;
+        case 'cad': return (isFinite(a.cad)||isFinite(b.cad)) ? lerpNum(a.cadS?? a.cad, b.cadS?? b.cad, 0.5) : NaN;
+        case 'pwr': return (isFinite(a.pwr)||isFinite(b.pwr)) ? lerpNum(a.pwrS?? a.pwr, b.pwrS?? b.pwr, 0.5) : NaN;
+        case 'spd': {
+          let v = lerpNum(a.spdS, b.spdS, 0.5);
+          if (!isFinite(v)) {
+            v = segmentKmh(a,b);
+            if (!isFinite(v)) {
+              const avg = lerpNum(a.spdKmh, b.spdKmh, 0.5);
+              if (isFinite(avg)) v = avg;
             }
-            default: return NaN;
+          }
+          return isFinite(v) ? v : NaN;
         }
+        default: return NaN;
+      }
     }
+
+
+      // === 스무딩 유틸리티 & 상수 (data-core.js와 동일 기준) ===
+      const HR_MIN  = 30;
+      const CAD_MIN = 5;
+
+      function fillForward(arr, maxGap = 3){
+        const out = arr.slice(); let last = NaN, gap = 0;
+        for (let i=0;i<out.length;i++){
+          const v = out[i];
+          if (Number.isFinite(v)) { last = v; gap = 0; }
+          else if (Number.isFinite(last) && gap < maxGap) { out[i] = last; gap++; }
+        }
+        return out;
+      }
+      function movingMean(arr, w=7){
+        const n=arr.length, out=new Array(n).fill(NaN);
+        const k=Math.floor(w/2);
+        for(let i=0;i<n;i++){
+          let s=0,c=0;
+          for(let j=i-k;j<=i+k;j++){
+            if (j<0||j>=n) continue;
+            const v=arr[j];
+            if (Number.isFinite(v)){ s+=v; c++; }
+          }
+          out[i]= c? s/c : NaN;
+        }
+        return out;
+      }
+      function medianFilter(arr, w=5){
+        const n=arr.length, out=new Array(n).fill(NaN);
+        const k=Math.floor(w/2);
+        for(let i=0;i<n;i++){
+          const win=[];
+          for(let j=i-k;j<=i+k;j++){
+            if (j<0||j>=n) continue;
+            const v=arr[j];
+            if (Number.isFinite(v)) win.push(v);
+          }
+          win.sort((a,b)=>a-b);
+          out[i]= win.length? win[Math.floor(win.length/2)] : NaN;
+        }
+        return out;
+      }
+
 
     // ★ 각 항목의 min/max 계산(속도는 segmentKmh로)
     function computeStatRange(pts){
-        const acc = { ele:[], spd:[], hr:[], cad:[], pwr:[] };
-        for (let i=1;i<pts.length;i++){
-            const a=pts[i-1], b=pts[i];
-            const spd = segmentKmh(a,b);
-            if (isFinite(spd)) acc.spd.push(spd);
-            if (isFinite(a.ele)) acc.ele.push(a.ele);
-            if (isFinite(b.ele)) acc.ele.push(b.ele);
-            if (isFinite(a.hr )) acc.hr .push(a.hr );
-            if (isFinite(b.hr )) acc.hr .push(b.hr );
-            if (isFinite(a.cad)) acc.cad.push(a.cad);
-            if (isFinite(b.cad)) acc.cad.push(b.cad);
-            if (isFinite(a.pwr)) acc.pwr.push(a.pwr);
-            if (isFinite(b.pwr)) acc.pwr.push(b.pwr);
+      const acc = { ele:[], spd:[], hr:[], cad:[], pwr:[] };
+      const n = pts.length;
+      // 1) 세그먼트 속도 수집
+      const spdArr = new Array(n).fill(NaN);
+      for (let i=1;i<n;i++){
+        const a=pts[i-1], b=pts[i];
+        let spd = segmentKmh(a,b);
+        if (!isFinite(spd)) {
+          const s1=a.spdKmh, s2=b.spdKmh;
+          const avg=lerpNum(s1, s2, 0.5);
+          if (isFinite(avg)) spd=avg;
         }
-        for (const k of Object.keys(statRange)){
-            const arr = acc[k];
-            if (!arr.length){ statRange[k] = {min:NaN, max:NaN}; continue; }
-            statRange[k] = { min: Math.min(...arr), max: Math.max(...arr) };
-        }
+        if (isFinite(spd)) { acc.spd.push(spd); spdArr[i] = spd; }
+
+        if (isFinite(a.ele)) acc.ele.push(a.ele);
+        if (isFinite(b.ele)) acc.ele.push(b.ele);
+        if (isFinite(a.hr )) acc.hr .push(a.hr );
+        if (isFinite(b.hr )) acc.hr .push(b.hr );
+        if (isFinite(a.cad)) acc.cad.push(a.cad);
+        if (isFinite(b.cad)) acc.cad.push(b.cad);
+        if (isFinite(a.pwr)) acc.pwr.push(a.pwr);
+        if (isFinite(b.pwr)) acc.pwr.push(b.pwr);
+      }
+      // 2) 범위
+      for (const k of Object.keys(statRange)){
+        const arr = acc[k];
+        statRange[k] = (!arr.length) ? {min:NaN, max:NaN} : {min:Math.min(...arr), max:Math.max(...arr)};
+      }
+      // 3) 스무딩(공통 기준)
+      const eleRaw  = pts.map(p=>p.ele);
+      const hrRaw   = pts.map(p=>p.hr);
+      const cadRaw  = pts.map(p=>p.cad);
+      const pwrRaw  = pts.map(p=>p.pwr);
+
+      const hrClean  = hrRaw.map(v  => (Number.isFinite(v) && v >= HR_MIN  ? v : NaN));
+      const cadClean = cadRaw.map(v => (Number.isFinite(v) && v >= CAD_MIN ? v : NaN));
+
+      const hrSm  = movingMean(medianFilter(fillForward(hrClean,3), 5), 7);
+      const cadSm = movingMean(medianFilter(fillForward(cadClean,3),5), 7);
+      const eleSm = movingMean(medianFilter(eleRaw, 31), 5);
+      const spdSm = movingMean(medianFilter(spdArr, 9), 7);
+      const pwrSm = movingMean(pwrRaw, 5);
+
+      for (let i=0;i<n;i++){
+        const p=pts[i];
+        p.hrS  = hrSm[i];
+        p.cadS = cadSm[i];
+        p.eleS = eleSm[i];
+        p.pwrS = pwrSm[i];
+        p.spdS = spdSm[i];
+      }
     }
+    
 
     // ★ 현재 모드/값을 컬러(hex)로
     function colorFor(mode, a, b){
-        if (mode==='mono') return '#ef4444';
-        const rng = statRange[mode] || {min:NaN, max:NaN};
-        const v   = metricValue(mode, a, b);
-        const t   = norm01(v, rng.min, rng.max);
-        return hueRamp01(t);
+      if (mode==='mono') return '#ef4444';
+
+      const rng = statRange[mode] || {min:NaN, max:NaN};
+      const v   = metricValue(mode, a, b);
+      let t     = norm01(v, rng.min, rng.max);
+
+      if (mode === 'spd') {
+        t = 1 - t;                 // ★ 변경: 속도만 반전 (빠름=블루, 느림=레드)
+      }
+      return hueRamp01(t);
     }
+
 
     // ★ 세그먼트 폴리라인 생성/갱신
     function buildGradientRoute(mode){
@@ -786,8 +893,6 @@
 
     // 오버뷰도 단색 키 유지(원하면 동일 스케일 전파 가능)
     }
-
-
 
     function resetAll(){
       if (animReq){ cancelAnimationFrame(animReq); animReq=null; }
