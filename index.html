@@ -99,6 +99,7 @@
       html, body { margin: 0; }
       #gpxFile {width: 200px;}
       #playBtn {width: 85px; }
+      .control h1 { font-size: 20px;}
 
       .control{
         position: fixed;
@@ -119,11 +120,12 @@
       }
 
       .control .row{
-        font-size:13px;
-        margin:6px 0;
+        font-size:16px;
+        margin:10px 0;
         padding:0;
         border:0;                 /* row에 걸린 보더도 제거 */
       }
+      .control input[type="file"]{ font-size:16px; }
 
       .control .slider-wrap{ gap:3px; padding:3px 6px; }
       .control .val{ min-width:3ch; }   /* 숫자 폭 더 줄이기 */
@@ -135,14 +137,15 @@
         box-shadow:none;          /* 보더처럼 보이는 그림자도 제거 */
         outline:0;
       }
+      .control .chk span {font-weight: bold; color: #3f4449 }
       #fitBtn{ display:none; }
-      .control button{ padding:3px 8px; font-size:13px; font-weight:500; }
-      #colorMode {font-size: 13px; padding: 1px 4px ;}
+      .control button{ padding:3px 8px; font-size:16px; font-weight:500; }
+      #colorMode {font-size: 16px; padding: 1px 4px ;}
 
       .hud{
         /* 기존: translate(-50%, calc(-100% - 44px)) 였다면 살짝만 줄 조정 */
         transform: translate(-50%, calc(-100% - 36px));
-        font-size: 14px;
+        font-size: 16px;
       }
     }
   </style>
