@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>Leaflet + OSM + GPX (버튼 통합 + 옵션 + 오버뷰 + 뒤로가기)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-gpx/1.7.0/gpx.min.js"></script>
+  <style>
+    html, body, #map { height: 100%; margin: 0; padding: 0; }
+    .control{
+      position: fixed; z-index: 1000; left: 10px; top: 8px;
+      background: rgba(255,255,255,.96); backdrop-filter: saturate(120%) blur(2px);
+      padding: 10px 12px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.2);
+      font: 14px/1.2 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
+    }
+    .control h1{ font-size:14px; margin:0 0 8px; font-weight:700; }
+    .control .row{ display:flex; gap:10px; align-items:center; margin-top:6px; flex-wrap:wrap; }
+    .control input[type="file"]{ font-size:12px; }
+    .control button{
+      appearance:none; border:1px solid #e2e8f0; background:#0ea5e9; color:#fff;
+      padding:6px 10px; border-radius:8px; cursor:pointer; font-weight:700;
+    }
+    .control button:disabled{ background:#94a3b8; cursor:not-allowed; }
+    .control .chk { display:flex; align-items:center; gap:6px; padding:6px 10px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; }
+    .control .slider-wrap{ display:flex; justify-content: space-between; align-items:center; gap:8px; padding:6px 8px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; }
+    .control .slider-wrap label{ background:transparent; color:#0f172a; border:0; padding:0; font-weight:800; }
+    .control input[type="range"]{ width:360px; accent-color:#0ea5e9; }
+    .control .val{ min-width:56px; text-align:right; font-weight:800; color:#0f172a; }
+
+    .marker-pill{
+      position:relative; display:inline-flex; align-items:center; gap:6px;
+      padding:6px 10px; border-radius:999px;
+      font:600 12px/1.2 "Segoe UI",system-ui,-apple-system,"Noto Sans KR",sans-serif;
+      color:#0f172a; background:#fff; border:1px solid rgba(2,6,23,.1);
+      box-shadow:0 4px 10px rgba(2,6,23,.12); transform:translate(-50%,-100%);
+      white-space:nowrap; pointer-events:none;
+    }
+    .marker-pill::after{
+      content:""; position:absolute; left:50%; bottom:-6px; translate:-50% 0;
+      border:6px solid transparent; border-top-color:#fff; filter:drop-shadow(0 -1px 0 rgba(2,6,23,.08));
+    }
+    .marker-start span:first-child{ color:#16a34a; }
+    .marker-end   span:first-child{ color:#ef4444; }
+
+    .hud{
+      position:relative; display:inline-flex; flex-direction:column; gap:6px;
+      padding:8px 10px; border-radius:10px; background:rgba(255,255,255,.96);
+      border:1px solid #e2e8f0; box-shadow:0 6px 16px rgba(0,0,0,.12);
+      font:12px/1.2 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif; color:#0f172a;
+      transform:translate(-50%, calc(-100% - 44px)); pointer-events:none; white-space:nowrap;
+      font-variant-numeric: tabular-nums; -moz-font-feature-settings:"tnum"; -webkit-font-feature-settings:"tnum"; font-feature-settings:"tnum";
+    }
+    .hud .chip{ display:grid; grid-template-columns:18px 56px minmax(54px, max-content); column-gap:8px; align-items:center; }
+    .hud .label{ opacity:.7; }
+    .hud .val{ text-align:right; font-weight:700; }
+
+    .overview{
+      position: fixed; z-index: 600; left: 12px; bottom: 12px;
+      display: grid; gap: 6px;
+      padding: 8px; border-radius: 10px; background: rgba(255,255,255,.96);
+      border: 1px solid #e2e8f0; box-shadow: 0 6px 18px rgba(0,0,0,.18);
+      font: 12px system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif; color:#0f172a;
+    }
+    #miniMap{
+      width: 220px; height: 150px; border-radius: 8px; overflow: hidden;
+      border: 1px solid #e2e8f0;
+    }
+    .ovr-legend{ display:flex; padding: 0 10px; gap:10px; align-items:center; justify-content:space-between; }
+    .ovr-legend .key{ display:inline-block; width:25px; height:3px; background:#ef4444; border-radius:999px; }
+    .ovr-legend .dot{ display:inline-block; width:10px; height:10px; border-radius:50%; background:#0ea5e9; outline:0.5px solid #1f2937; }
+
+    @media screen and (max-width: 640px) {
+      .control{
+        left:10px;
+        padding:10px 10px;
+        border-radius:5px;
+      }
+
+      .control .row{
+        font-size:12px;
+        margin:6px 0;
+        padding:0;
+        border:0;                 /* row에 걸린 보더도 제거 */
+      }
+
+      .control .chk,
+      .control .slider-wrap  {
+        padding: 0 ;
+        border:0;                 /* 여기! 자손 선택자로 정확히 지정 */
+        box-shadow:none;          /* 보더처럼 보이는 그림자도 제거 */
+        outline:0;
+      }
+      #fitBtn{ display:none; }
+      .control input[type="range"]{ max-width: 300px; }
+      .control button{ padding:3px 8px; font-size:13px; font-weight:500; }
+    }
+
+
+  </style>
+</head>
+<body>
+  <div class="control">
+    <h1>GPX ReLiveView</h1>
+    <div class="row">
+      <input type="file" id="gpxFile" accept=".gpx" />
+      <button id="fitBtn" disabled>전체 경로 보기</button>
+      <button id="playBtn" disabled>▶ 재생</button>
+      <!-- ▶ 뒤로가기 버튼 (일시정지 시 활성화) -->
+      <button id="backBtn" disabled>⟲ 뒤로가기</button>
+    </div>
+    <div class="row">
+      <label class="chk"><input type="checkbox" id="optRealSpeed"> 실제 주행속도 적용</label>
+      <label class="chk"><input type="checkbox" id="optSpeedCtl" checked> 배속 조정</label>
+      <!-- ★ 추가: 경로 색상 모드 -->
+      <div class="row">
+        <label class="chk" style="gap:8px; border:0; background:transparent; padding:0;">
+            <span style="font-weight:800;">경로 색상</span>
+            <select id="colorMode" style="padding:6px 10px; border:1px solid #e2e8f0; border-radius:8px;">
+                <option value="mono">단색(기본)</option>
+                <option value="ele">고도</option>
+                <option value="spd">속도</option>
+                <option value="hr">심박</option>
+                <option value="cad">케이던스</option>
+                <option value="pwr">파워</option>
+            </select>
+        </label>
+      </div>
+    </div>
+
+    <div class="row slider-wrap">
+      <label for="speedRange">배속</label>
+      <input type="range" id="speedRange" min="0" max="100" step="0.1" value="1" />
+      <span class="val"><span id="speedValue">1.0</span>×</span>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <div class="overview">
+    <div id="miniMap" aria-label="오버뷰 지도"></div>
+    <div class="ovr-legend">
+      <span><span class="key"></span> 전체경로</span>
+      <span><span class="dot"></span> 현재위치</span>
+    </div>
+  </div>
+
+  <script>
+    // ───────── 전역 상태 ─────────
+    let lastAbsMs = NaN; // ★ 마지막으로 렌더한 절대 시각(ms)을 전역으로 보존
+    let map, gpxLayer=null, marker=null, hudMarker=null, animReq=null, stepRef=null;
+    let paused=false, lastFrameTime=0, mode='distance';
+    let speed=1;
+    const BASE_DURATION=8000;
+
+    // ★ 변경: 뒤로가기 동작을 "거리 100m" 단위로
+    const BACK_STEP_METERS = 100; // ← 100 m 고정                        // ★ 변경
+
+    // 제거: 기존 분기용 상수 (5%/5초)
+    // const BACK_STEP_FRAC = 0.05;
+    // const BACK_STEP_MS   = 5000;
+
+    let distPts=[], distCum=[], distScaled=0;
+    let totalDistMeters = 0;       // 전체 거리(m)                         // ★ 변경
+    let curDistMeters   = 0;       // 현재 누적 거리(m)                     // ★ 변경
+    
+    let currentIndex = 0;
+
+    let timeAnim=null; // { pts, t0, tEnd, totalMs, tArr, elapsed }
+
+    // 오버뷰
+    let miniMap, miniRoute=null, miniMarker=null, miniBounds=null;
+
+    // ★ 추가: 경로 컬러링 관련 전역
+    let gradientGroup = null;   // 세그먼트 폴리라인을 담는 그룹
+    let colorModeEl   = null;   // 드롭다운 엘리먼트
+    let statRange = {           // 컬러 스케일용 최소/최대값
+    ele: {min:NaN, max:NaN},
+    spd: {min:NaN, max:NaN},
+    hr : {min:NaN, max:NaN},
+    cad: {min:NaN, max:NaN},
+    pwr: {min:NaN, max:NaN},
+    };
+
+
+    // ───────── 지도 초기화 ─────────
+    map = L.map('map', { zoomControl:false }).setView([36.5,127.9], 7);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/">OSM</a> contributors'
+    }).addTo(map);
+
+    // ★ 추가: 그라데이션 라인용 pane(타일/기타 오버레이 위에 확실히 표시)
+    map.createPane('routePane');
+    map.getPane('routePane').style.zIndex = 420;
+
+    miniMap = L.map('miniMap', {
+      attributionControl:false, zoomControl:false,
+      dragging:false, scrollWheelZoom:false, doubleClickZoom:false,
+      boxZoom:false, keyboard:false, tap:false, touchZoom:false
+    }).setView([36.5,127.9], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(miniMap);
+
+    const startDivIcon = L.divIcon({ className:"", html:`<div class="marker-pill marker-start"><span>🟢</span><span>START</span></div>` });
+    const endDivIcon   = L.divIcon({ className:"", html:`<div class="marker-pill marker-end"><span>🏁</span><span>FINISH</span></div>` });
+
+    const iconRight = L.icon({ iconUrl:'icons/cycling-right.png', iconSize:[40,40], iconAnchor:[14,28] });
+    const iconLeft  = L.icon({ iconUrl:'icons/cycling-left.png',  iconSize:[40,40], iconAnchor:[14,28] });
+
+    const hudDivIcon = L.divIcon({
+      className:"",
+      html:`<div id="hud" class="hud">
+              <span class="chip"><span>🚴</span><span class="label">속도</span><span class="val" id="hudSpd">—</span></span>
+              <span class="chip"><span>❤️</span><span class="label">심박</span><span class="val" id="hudHr">—</span></span>
+              <span class="chip"><span>⛰</span><span class="label">고도</span><span class="val" id="hudEle">—</span></span>
+              <span class="chip"><span>🔁</span><span class="label">케이던스</span><span class="val" id="hudCad">—</span></span>
+              <span class="chip"><span>⚡</span><span class="label">파워</span><span class="val" id="hudPwr">—</span></span>
+              <!-- ★ 추가: 누적거리 (파워와 현재시각 사이) -->
+              <span class="chip"><span>📏</span><span class="label">누적거리</span><span class="val" id="hudDist">0.00 km</span></span> <!-- ★ 변경 -->
+              <span class="chip"><span>🕒</span><span class="label">현재시각</span><span class="val" id="hudTime">—</span></span>
+            </div>`
+    });
+
+    // ───────── UI 엘리먼트 ─────────
+    const fitBtn = document.getElementById('fitBtn');
+    const playBtn = document.getElementById('playBtn');
+    const backBtn = document.getElementById('backBtn');
+    const optRealSpeed = document.getElementById('optRealSpeed');
+    const optSpeedCtl  = document.getElementById('optSpeedCtl');
+    const speedRange = document.getElementById('speedRange');
+    const speedValue = document.getElementById('speedValue');
+
+    function applySpeedCtlUI() {
+      const enabled = optSpeedCtl.checked;
+      speedRange.disabled = !enabled;
+      if (!enabled) { speed = 1; speedRange.value = "1"; speedValue.textContent = "1.0"; }
+    }
+    optSpeedCtl.addEventListener('change', applySpeedCtlUI);
+    applySpeedCtlUI();
+
+    speedRange.addEventListener('input', (e)=>{
+      const v = parseFloat(e.target.value);
+      speed = Number.isFinite(v) ? v : 1;
+      speedValue.textContent = speed.toFixed(1);
+    });
+
+    // 파일 로드
+    document.getElementById('gpxFile').addEventListener('change',(e)=>{
+      const file = e.target.files?.[0];
+      if (!file) return;
+      resetAll();
+
+      const reader = new FileReader();
+      reader.onload = (evt)=>{
+        const gpxText = evt.target.result;
+
+        distPts = parseGpxPoints(gpxText);
+        distCum = buildCumDist(distPts);
+        totalDistMeters = distCum.length ? distCum[distCum.length-1] : 0;                // ★ 변경
+        curDistMeters = 0;                                                               // ★ 변경
+
+        // ★ 추가: 컬러 스케일용 통계 계산(속도는 세그먼트 속도로 산출)
+        computeStatRange(distPts);
+
+        // ★ 추가: 드롭다운 핸들러 준비
+        if (!colorModeEl) colorModeEl = document.getElementById('colorMode');
+        if (colorModeEl) {
+        colorModeEl.onchange = () => buildGradientRoute(colorModeEl.value || 'mono');
+        }
+
+        // ★ 추가: 초기 그리기(단색)
+        buildGradientRoute('mono');
+
+
+        // 오버뷰 라인
+        if (miniRoute){ miniMap.removeLayer(miniRoute); miniRoute=null; }
+        if (distPts.length >= 2){
+          const latlngs = distPts.map(p=>[p.lat,p.lng]);
+          miniRoute = L.polyline(latlngs, { color:'#ef4444', weight:3, opacity:0.9 }).addTo(miniMap);
+          miniBounds = miniRoute.getBounds();
+          miniMap.fitBounds(miniBounds, { padding:[6,6] });
+        }
+
+        gpxLayer = new L.GPX(gpxText, {
+          async:true,
+          marker_options:{ startIcon:startDivIcon, endIcon:endDivIcon, startIconUrl:null, endIconUrl:null, shadowUrl:null },
+          // ★ 기본 단색 라인은 숨기고, 커스텀 세그먼트 라인을 별도 레이어로 그림
+          polyline_options:{ color:'#ef4444', weight:4, opacity:0 }
+        })
+        .on('loaded', (ev)=>{
+          map.fitBounds(ev.target.getBounds(), { padding:[40,40] });
+
+          const initialIcon = decideInitialIcon(distPts);
+          marker = L.marker(map.getCenter(),{ title:'GPX Marker', icon:initialIcon }).addTo(map);
+          hudMarker = L.marker(map.getCenter(),{ icon:hudDivIcon, interactive:false, keyboard:false }).addTo(map);
+
+          // 오버뷰 현재위치 마커
+          const c = map.getCenter();
+          if (miniMarker){ miniMap.removeLayer(miniMarker); }
+          miniMarker = L.circleMarker([c.lat, c.lng], {
+            radius:4, color:'#1f2937', weight:2, fillColor:'#0ea5e9', fillOpacity:1
+          }).addTo(miniMap);
+
+          const ok = distPts.length >= 2;
+          fitBtn.disabled = !ok;
+          playBtn.disabled = !ok;
+          backBtn.disabled = true; // 시작은 비활성
+          setPlayButton(false);
+        })
+        .addTo(map);
+      };
+      reader.readAsText(file);
+    });
+
+    // 경로 맞춤
+    fitBtn.addEventListener('click', ()=>{
+      if (!gpxLayer) return;
+      map.fitBounds(gpxLayer.getBounds(), { padding:[40,40] });
+      const c = map.getCenter();
+      if (marker) marker.setLatLng(c);
+      if (hudMarker) hudMarker.setLatLng(c);
+    });
+
+    function setPlayButton(isPlaying){
+      playBtn.textContent = isPlaying ? "⏸ 일시정지" : "▶ 재생";
+
+      // 애니 프레임 정리(경합 방지)
+      if (!isPlaying) cancelAnimFrameIfAny();
+
+      // 일시정지 + 데이터 준비됨일 때만 뒤로가기 가능
+      const canBack = !isPlaying && distCum && distCum.length >= 2 && totalDistMeters > 0;
+      backBtn.disabled = !canBack;
+    }
+
+
+
+    // ▶ 뒤로가기 동작 (항상 "거리 100m" 기준으로 이동)                         // ★ 변경
+    // 중복클릭 디바운스 + RAF 경합 제거 + plateau 처리 + "진짜 뒤로" 보장
+    let backLastTs = 0;
+
+    backBtn.addEventListener('click', ()=>{
+      if (backBtn.disabled) return;
+      if (!Array.isArray(distCum) || distCum.length < 2 || !Number.isFinite(totalDistMeters) || totalDistMeters <= 0) return;
+
+      const now = performance.now();
+      if (now - backLastTs < 120) return; // 120ms 디바운스
+      backLastTs = now;
+
+      cancelAnimFrameIfAny(); // 진행중 애니 취소(경합 방지)
+
+      // 현재 누적거리 기준으로 100 m 뒤로
+      const nowDist = getCurrentDistMeters();
+      const target  = Math.max(0, nowDist - BACK_STEP_METERS);
+
+      // 현재 인덱스를 힌트로 사용(없으면 현재 거리로 역산)
+      const hintIdx = Number.isInteger(currentIndex) ? currentIndex : findIndexAtDistance(distCum, nowDist, null);
+
+      // 항상 hint보다 앞쪽(작은 인덱스)으로 스냅해 실제 뒤로감을 보장
+      const idx = findIndexAtDistance(distCum, target, hintIdx);
+
+      if (idx >= 0) renderAtIndex(idx);
+      else renderAtDistanceMeters(target - 1e-3); // 폴백
+
+      // ⟵ [수정 2] 시간 모드일 때, 방금 렌더된 절대시각(lastAbsMs)을 기준으로 재개 오프셋을 동기화
+      if (mode === 'time' && timeAnim && Number.isFinite(lastAbsMs)) {
+        timeAnim.elapsed = clamp(lastAbsMs - timeAnim.t0, 0, timeAnim.totalMs);
+      }
+
+    });
+
+    
+
+    playBtn.addEventListener('click', ()=>{
+      if (!marker || distPts.length < 2) return;
+
+      if (!stepRef){
+        paused = false;
+        lastFrameTime = performance.now();
+
+        // ★ 추가: 완주 상태면 '처음부터' 재생하기 위해 즉시 시작점으로 이동+리셋
+        const atEnd = isAtEnd();
+        let resumeMs;
+        if (atEnd) {
+          renderAtIndex(0);   // 마커/미니맵을 시작 지점으로 즉시 이동
+          resumeMs  = 0;      // 거리 모드 진행도 리셋
+          lastAbsMs = NaN;    // 시간 복원값 제거
+          if (timeAnim) timeAnim.elapsed = 0; // 시간 모드 진행도 리셋
+        } else {
+          // 종료가 아니면 '현재 위치'에서 이어서
+          resumeMs = (Number.isFinite(totalDistMeters) && totalDistMeters > 0)
+            ? (getCurrentDistMeters() / totalDistMeters) * BASE_DURATION
+            : distScaled; // 안전장치
+        }
+        distScaled = resumeMs;
+
+        if (optRealSpeed.checked && hasValidTime(distPts)){
+          mode = 'time';
+          timeAnim = prepTimeAnim(distPts);
+
+          if (atEnd) {
+            timeAnim.elapsed = 0; // 처음부터
+          } else if (Number.isFinite(lastAbsMs)) {
+            timeAnim.elapsed = clamp(lastAbsMs - timeAnim.t0, 0, timeAnim.totalMs);
+          } else {
+            timeAnim.elapsed = clamp((distScaled / BASE_DURATION) * timeAnim.totalMs, 0, timeAnim.totalMs);
+          }
+          animateByTime();
+        } else {
+          mode = 'distance';
+          animateByDistance();
+        }
+        setPlayButton(true);
+        return;
+      }
+
+
+
+      paused = !paused;
+      setPlayButton(!paused);
+
+      // ⟵ [수정 1] 재생으로 전환되는 순간, 프레임 기준 시간 초기화(점프 방지)
+      if (!paused) {
+        lastFrameTime = performance.now();
+        if (!animReq) animReq = requestAnimationFrame(stepRef);
+      }
+    });
+
+    // ───────── 애니메이션/렌더 ─────────
+    function animateByDistance(){
+      if (!marker || distPts.length < 2) return;
+
+      function step(now){
+        const dt = now - lastFrameTime; lastFrameTime = now;
+        if (!paused) distScaled += dt * (optSpeedCtl.checked ? speed : 1);
+        renderAtDistanceProgress(distScaled);
+
+        const done = (distScaled / BASE_DURATION) >= 1;
+        if (!done) animReq = requestAnimationFrame(step); else { animReq=null; stepRef=null; setPlayButton(false); }
+      }
+      stepRef = step;
+      animReq = requestAnimationFrame(step);
+    }
+
+    // 거리(ms 스케일) → 렌더
+    function renderAtDistanceProgress(progressMs){
+      if (distCum.length < 2) return;
+      const total = totalDistMeters;
+      const t = clamp(progressMs / BASE_DURATION, 0, 1);
+      const target = t * total;                 // 목표 누적거리(m)
+      curDistMeters = target;                   // ★ 현재 누적거리 갱신
+
+      // 이분 탐색으로 구간 찾기
+      let lo=1, hi=distCum.length-1, idx=1;
+      while (lo<=hi){ const mid=(lo+hi)>>1; if (distCum[mid] < target){ idx=mid+1; lo=mid+1; } else { idx=mid; hi=mid-1; } }
+      idx = Math.min(idx, distPts.length-1);
+
+      currentIndex = idx;
+
+      const a = distPts[idx-1], b = distPts[idx];
+      const segStart = distCum[idx-1];
+      const segLen = Math.max(1, distCum[idx]-segStart);
+      const segT = clamp((target - segStart) / segLen, 0, 1);
+
+      // a~b 사이의 보간 시각
+      let curAbsMs = NaN;
+      if (isFinite(a.timeMs) && isFinite(b.timeMs)) {
+        curAbsMs = a.timeMs + (b.timeMs - a.timeMs) * segT;
+      }
+      updatePositionAndHud(a, b, segT, curAbsMs, curDistMeters); // ★ 누적거리 전달
+    }
+
+    // 거리(m) 직접 지정 → 렌더 (뒤로가기에서 사용)                             // ★ 변경
+    function renderAtDistanceMeters(dMeters){
+      if (!Number.isFinite(totalDistMeters) || totalDistMeters <= 0) return;
+      const clamped = clamp(dMeters, 0, totalDistMeters);
+      // 거리 → 진행(ms) 역변환
+      distScaled = (clamped / totalDistMeters) * BASE_DURATION;
+      renderAtDistanceProgress(distScaled);
+    }
+
+    function animateByTime(){
+      if (!marker || !timeAnim) return;
+
+      function step(now){
+        const dt = now - lastFrameTime; lastFrameTime = now;
+        if (!paused) timeAnim.elapsed += dt * (optSpeedCtl.checked ? speed : 1);
+        const curAbs = timeAnim.t0 + clamp(timeAnim.elapsed, 0, timeAnim.totalMs);
+        renderAtAbsTime(curAbs);
+
+        const done = curAbs >= timeAnim.tEnd;
+        if (!done) animReq = requestAnimationFrame(step); else { animReq=null; stepRef=null; setPlayButton(false); }
+      }
+      stepRef = step;
+      animReq = requestAnimationFrame(step);
+    }
+
+    function renderAtAbsTime(curAbs){
+      const tArr = timeAnim.tArr, pts=timeAnim.pts;
+      let lo=1, hi=tArr.length-1, idx=1;
+      while (lo<=hi){ const mid=(lo+hi)>>1; if (tArr[mid] <= curAbs){ idx=mid+1; lo=mid+1; } else { idx=mid; hi=mid-1; } }
+      idx = Math.min(idx, pts.length-1);
+
+      const a = pts[idx-1], b = pts[idx];
+      // ↓ 아래 1~2줄 추가(원본 인덱스 보존: a.idx/b.idx는 distPts의 인덱스)
+      if (Number.isFinite(a.idx)) currentIndex = a.idx;
+      
+      const dtSeg = Math.max(1, b.timeMs - a.timeMs);
+      const segT = clamp((curAbs - a.timeMs) / dtSeg, 0, 1);
+
+      // ★ 시간 모드에서도 현재 "누적거리(m)"를 정확히 계산
+      const segLenMeters = L.latLng(a.lat,a.lng).distanceTo(L.latLng(b.lat,b.lng));
+      const startCum = isFinite(a.idx) ? distCum[a.idx] : 0;
+      curDistMeters = startCum + segT * segLenMeters;
+
+      updatePositionAndHud(a, b, segT, curAbs, curDistMeters); // ★ 누적거리 전달
+    }
+
+    // 위치/아이콘/HUD 갱신
+    function updatePositionAndHud(a,b,segT, currentAbsMs, distMetersNow){
+      const lat = a.lat + (b.lat - a.lat) * segT;
+      const lng = a.lng + (b.lng - a.lng) * segT;
+      const dx  = b.lng - a.lng;
+      marker.setIcon(Math.abs(dx) >= 1e-12 ? (dx >= 0 ? iconRight : iconLeft) : ((b.lat - a.lat) >= 0 ? iconRight : iconLeft));
+
+      const elev = lerpNum(a.ele,b.ele,segT);
+      const hr   = lerpNum(a.hr, b.hr, segT);
+      const cad  = lerpNum(a.cad,b.cad,segT);
+      const pwr  = lerpNum(a.pwr,b.pwr,segT);
+      const spd  = segmentKmh(a,b);
+
+      const timeTxt = isFinite(currentAbsMs) ? msToClock(currentAbsMs) : "—";
+      updateHud(spd, hr, elev, cad, pwr, timeTxt, distMetersNow); // ★ 누적거리 포함
+
+      // ★ 현재 렌더된 절대 시각을 저장(시간 모드 재개 시 복원용)
+      if (isFinite(currentAbsMs)) lastAbsMs = currentAbsMs;
+
+      map.setView([lat,lng], map.getZoom(), { animate:false });
+      const c = map.getCenter();
+      marker.setLatLng(c);
+      hudMarker.setLatLng(c);
+
+      if (miniMarker) miniMarker.setLatLng([lat, lng]);
+    }
+
+    // ───────── 파서/유틸 ─────────
+    function parseGpxPoints(gpxText){
+      const out=[];
+      try{
+        const doc = new DOMParser().parseFromString(gpxText,"application/xml");
+        const pts = Array.from(doc.getElementsByTagName("trkpt"));
+        for (const pt of pts){
+          const lat = parseFloat(pt.getAttribute("lat"));
+          const lng = parseFloat(pt.getAttribute("lon") || pt.getAttribute("lng"));
+          if (!isFinite(lat) || !isFinite(lng)) continue;
+
+          const timeEl = pt.getElementsByTagName("time")[0];
+          const tStr   = timeEl ? timeEl.textContent.trim() : null;
+          const timeMs = tStr ? Date.parse(tStr) : NaN;
+
+          const eleEl  = pt.getElementsByTagName("ele")[0];
+          const ele    = eleEl ? parseFloat(eleEl.textContent.trim()) : NaN;
+
+          const hr  = firstNumber(pt, ["hr","gpxtpx:hr","ns3:hr"]);
+          const cad = firstNumber(pt, ["cad","cadence","gpxtpx:cad","ns3:cad"]);
+          const pwr = firstNumber(pt, ["power","Power","gpxtpx:power","ns3:power","watts","ns3:watts"]);
+
+          // ★ 원본 인덱스를 보존해 시간 모드에서 누적거리 계산에 사용
+          out.push({ lat,lng,timeMs,ele,hr,cad,pwr, idx: out.length });                  // ★ 변경
+        }
+      }catch(e){ console.warn("[GPX] 파싱 실패:", e); }
+      return out;
+    }
+
+    function buildCumDist(pts){
+      const acc=[0]; let sum=0;
+      for (let i=1;i<pts.length;i++){
+        const a=L.latLng(pts[i-1].lat, pts[i-1].lng);
+        const b=L.latLng(pts[i].lat,   pts[i].lng);
+        sum += a.distanceTo(b);
+        acc.push(sum);
+      }
+      return acc;
+    }
+
+    // 현재 누적거리(m)를 항상 안전하게 얻기 (curDistMeters가 NaN/초기값이어도 동작)
+    function getCurrentDistMeters(){
+      if (Number.isFinite(curDistMeters) && curDistMeters >= 0) return curDistMeters;
+      if (Number.isFinite(totalDistMeters) && totalDistMeters > 0){
+        const t = clamp(distScaled / BASE_DURATION, 0, 1);
+        return t * totalDistMeters;
+      }
+      return 0;
+    }
+
+    // ★ 추가: 현재가 '완주' 상태인지 판정(소수 오차 허용)
+    function isAtEnd(){
+      return Number.isFinite(totalDistMeters)
+          && totalDistMeters > 0
+          && (getCurrentDistMeters() >= totalDistMeters - 1e-3);
+    }
+
+
+    // 누적거리 배열에서 target 이하의 "안전한" 인덱스를 찾는다.
+    // - hintIdx가 있으면 그보다 "작은 인덱스"를 강제(진짜 뒤로 이동 보장)
+    // - plateau(중복 누적거리)에서는 동일값 구간의 "가장 처음 인덱스"로 이동
+    function findIndexAtDistance(distCum, target, hintIdx) {
+      if (!distCum || !distCum.length) return -1;
+      const EPS = 1e-3;
+
+      // 표준 이진탐색: distCum[mid] <= target 인 가장 큰 mid
+      let lo = 0, hi = distCum.length - 1, ans = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (distCum[mid] <= target + EPS) { ans = mid; lo = mid + 1; }
+        else { hi = mid - 1; }
+      }
+
+      // plateau의 시작점으로 이동
+      const val = distCum[ans];
+      while (ans > 0 && Math.abs(distCum[ans - 1] - val) <= EPS) ans--;
+
+      // 힌트가 있으면 반드시 hintIdx보다 작게 보정해 실제 "뒤로" 보장
+      if (Number.isInteger(hintIdx) && ans >= hintIdx) {
+        ans = Math.max(0, hintIdx - 1);
+        const v2 = distCum[ans];
+        while (ans > 0 && Math.abs(distCum[ans - 1] - v2) <= EPS) ans--;
+      }
+      return ans;
+    }
+
+    // 진행중 애니메이션 프레임이 있으면 취소(뒤로가기 순간 경합 방지)
+    function cancelAnimFrameIfAny() {
+      try { if (animReq) { cancelAnimationFrame(animReq); animReq = null; } } catch(e){}
+    }
+
+    function renderAtIndex(i){
+      if (!Array.isArray(distCum) || distCum.length === 0) return;
+      i = Math.max(0, Math.min(i, distCum.length - 1));
+      renderAtDistanceMeters(distCum[i]);
+      currentIndex = i; // 인덱스 갱신
+    }
+
+
+    
+
+
+
+
+    function prepTimeAnim(pts){
+      const valid = pts.filter(p=>isFinite(p.timeMs)).sort((a,b)=>a.timeMs-b.timeMs);
+      if (valid.length < 2) return null;
+      const t0 = valid[0].timeMs, tEnd = valid[valid.length-1].timeMs;
+      return { pts:valid, t0, tEnd, totalMs:Math.max(1, tEnd - t0), tArr:valid.map(p=>p.timeMs), elapsed:0 };
+    }
+
+    function updateHud(spdKmh, hr, ele, cad, pwr, timeText, distMeters){
+      const $=(id)=>document.getElementById(id);
+      const fmt=(v,u,d=0)=> (isFinite(v) ? (v.toFixed(d)+u) : "—");
+      const speedTxt = fmt(spdKmh,"km/h",1);
+      const hrTxt    = isFinite(hr)  ? Math.round(hr)  + " bpm" : "—";
+      const eleTxt   = isFinite(ele) ? Math.round(ele) + " m"   : "—";
+      const cadTxt   = isFinite(cad) ? Math.round(cad) + " rpm" : "—";
+      const pwrTxt   = isFinite(pwr) ? Math.round(pwr) + " W"   : "—";
+      const distTxt  = isFinite(distMeters) ? (distMeters/1000).toFixed(2) + " km" : "—"; // ★ 변경
+
+      const hs=$("hudSpd");  if (hs && hs.textContent!==speedTxt) hs.textContent=speedTxt;
+      const ht=$("hudTime"); if (ht && ht.textContent!==timeText) ht.textContent=timeText;
+      const hh=$("hudHr");   if (hh && hh.textContent!==hrTxt)   hh.textContent=hrTxt;
+      const he=$("hudEle");  if (he && he.textContent!==eleTxt)  he.textContent=eleTxt;
+      const hc=$("hudCad");  if (hc && hc.textContent!==cadTxt)  hc.textContent=cadTxt;
+      const hp=$("hudPwr");  if (hp && hp.textContent!==pwrTxt)  hp.textContent=pwrTxt;
+      const hd=$("hudDist"); if (hd && hd.textContent!==distTxt) hd.textContent=distTxt; // ★ 변경
+    }
+
+    function msToClock(ms){
+      const d = new Date(ms);
+      const hh = d.getHours().toString().padStart(2,'0');
+      const mm = d.getMinutes().toString().padStart(2,'0');
+      const ss = d.getSeconds().toString().padStart(2,'0');
+      return `${hh}:${mm}:${ss}`;
+    }
+
+    function decideInitialIcon(pts){
+      if (!pts || pts.length < 2) return iconRight;
+      const dx = pts[1].lng - pts[0].lng;
+      return dx >= 0 ? iconRight : iconLeft;
+    }
+    function hasValidTime(pts){ return pts.filter(p=>isFinite(p.timeMs)).length >= 2; }
+    function clamp(v,min,max){ return Math.max(min, Math.min(max,v)); }
+    function lerpNum(a,b,t){ const A=Number(a), B=Number(b); if (isFinite(A)&&isFinite(B)) return A+(B-A)*t; if (isFinite(A)) return A; if (isFinite(B)) return B; return NaN; }
+    function segmentKmh(a,b){ const dt=(b.timeMs-a.timeMs)/1000; if (!isFinite(dt)||dt<=0) return NaN; const d=L.latLng(a.lat,a.lng).distanceTo(L.latLng(b.lat,b.lng)); return (d/dt)*3.6; }
+    function firstNumber(el,names){
+      for (const n of names){ const e=el.getElementsByTagName(n)[0]; if (e && e.textContent!=null){ const v=parseFloat(e.textContent.trim()); if (isFinite(v)) return v; } }
+      const candidates=new Set(["hr","cad","cadence","power","watts"]);
+      const all=el.getElementsByTagName("*");
+      for (let i=0;i<all.length;i++){
+        const node=all[i]; const local=(node.localName||node.nodeName||"").toLowerCase();
+        if (candidates.has(local)){ const v=parseFloat(node.textContent.trim()); if (isFinite(v)) return v; }
+      }
+      return NaN;
+    }
+
+    // ★ 값 → 0~1 정규화
+    function norm01(v, min, max){
+        if (!isFinite(v) || !isFinite(min) || !isFinite(max) || max <= min) return NaN;
+        return Math.min(1, Math.max(0, (v - min) / (max - min)));
+    }
+
+    // ★ 0~1를 HSL 그라데이션으로 변환(파랑→청록→초록→노랑→주황→빨강)
+    function hueRamp01(t){
+        if (!isFinite(t)) return '#999999';
+        const h = (1 - t) * 240; // 240(파랑) → 0(빨강)
+        return `hsl(${h.toFixed(1)} 90% 50%)`;
+    }
+
+    // ★ 모드별 값 추출(세그먼트 a->b, segT는 사용 안 해도 됨)
+    function metricValue(mode, a, b){
+        switch(mode){
+            case 'ele': return (isFinite(a.ele)||isFinite(b.ele)) ? lerpNum(a.ele, b.ele, 0.5) : NaN;
+            case 'hr' : return (isFinite(a.hr) ||isFinite(b.hr )) ? lerpNum(a.hr , b.hr , 0.5) : NaN;
+            case 'cad': return (isFinite(a.cad)||isFinite(b.cad)) ? lerpNum(a.cad, b.cad, 0.5) : NaN;
+            case 'pwr': return (isFinite(a.pwr)||isFinite(b.pwr)) ? lerpNum(a.pwr, b.pwr, 0.5) : NaN;
+            case 'spd': {
+            const v = segmentKmh(a,b);
+            return isFinite(v) ? v : NaN;
+            }
+            default: return NaN;
+        }
+    }
+
+    // ★ 각 항목의 min/max 계산(속도는 segmentKmh로)
+    function computeStatRange(pts){
+        const acc = { ele:[], spd:[], hr:[], cad:[], pwr:[] };
+        for (let i=1;i<pts.length;i++){
+            const a=pts[i-1], b=pts[i];
+            const spd = segmentKmh(a,b);
+            if (isFinite(spd)) acc.spd.push(spd);
+            if (isFinite(a.ele)) acc.ele.push(a.ele);
+            if (isFinite(b.ele)) acc.ele.push(b.ele);
+            if (isFinite(a.hr )) acc.hr .push(a.hr );
+            if (isFinite(b.hr )) acc.hr .push(b.hr );
+            if (isFinite(a.cad)) acc.cad.push(a.cad);
+            if (isFinite(b.cad)) acc.cad.push(b.cad);
+            if (isFinite(a.pwr)) acc.pwr.push(a.pwr);
+            if (isFinite(b.pwr)) acc.pwr.push(b.pwr);
+        }
+        for (const k of Object.keys(statRange)){
+            const arr = acc[k];
+            if (!arr.length){ statRange[k] = {min:NaN, max:NaN}; continue; }
+            statRange[k] = { min: Math.min(...arr), max: Math.max(...arr) };
+        }
+    }
+
+    // ★ 현재 모드/값을 컬러(hex)로
+    function colorFor(mode, a, b){
+        if (mode==='mono') return '#ef4444';
+        const rng = statRange[mode] || {min:NaN, max:NaN};
+        const v   = metricValue(mode, a, b);
+        const t   = norm01(v, rng.min, rng.max);
+        return hueRamp01(t);
+    }
+
+    // ★ 세그먼트 폴리라인 생성/갱신
+    function buildGradientRoute(mode){
+        if (!Array.isArray(distPts) || distPts.length < 2) return;
+
+        // 이전 그룹 제거
+        if (gradientGroup){ map.removeLayer(gradientGroup); gradientGroup=null; }
+
+        // Canvas 렌더러 권장(성능)
+        const renderer = L.canvas({ padding:0.5 });
+
+        gradientGroup = L.layerGroup();
+        for (let i=1;i<distPts.length;i++){
+            const a = distPts[i-1], b = distPts[i];
+            const col = colorFor(mode, a, b);
+            const seg = L.polyline([[a.lat,a.lng],[b.lat,b.lng]], {
+                pane:'routePane',
+                color: col, weight: 5, opacity: 0.95, lineCap:'round', renderer
+            });
+
+            gradientGroup.addLayer(seg);
+        }
+        gradientGroup.addTo(map);
+
+    // 오버뷰도 단색 키 유지(원하면 동일 스케일 전파 가능)
+    }
+
+
+
+    function resetAll(){
+      if (animReq){ cancelAnimationFrame(animReq); animReq=null; }
+      stepRef=null; paused=false; lastFrameTime=0; mode='distance';
+      if (marker){ map.removeLayer(marker); marker=null; }
+      if (hudMarker){ map.removeLayer(hudMarker); hudMarker=null; }
+      if (gpxLayer){ map.removeLayer(gpxLayer); gpxLayer=null; }
+      distPts=[]; distCum=[]; distScaled=0; timeAnim=null;
+      speed=1; speedRange.value="1"; speedValue.textContent="1.0";
+      fitBtn.disabled = true; playBtn.disabled = true; backBtn.disabled = true;
+
+      totalDistMeters = 0;   // ★ 변경
+      curDistMeters = 0;     // ★ 변경
+      currentIndex = 0;
+
+      if (miniRoute){ miniMap.removeLayer(miniRoute); miniRoute=null; }
+      if (miniMarker){ miniMap.removeLayer(miniMarker); miniMarker=null; }
+      miniBounds=null;
+
+      // ★ 추가: 그라데이션 라인 그룹 제거
+      if (gradientGroup){ map.removeLayer(gradientGroup); gradientGroup=null; }
+    }
+  </script>
+</body>
+</html>
