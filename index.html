@@ -95,6 +95,15 @@
     .ovr-legend .key{ display:inline-block; width:25px; height:3px; background:#ef4444; border-radius:999px; }
     .ovr-legend .dot{ display:inline-block; width:10px; height:10px; border-radius:50%; background:#0ea5e9; outline:0.5px solid #1f2937; }
 
+    /* … 기존 스타일 … */
+    .stats{
+      margin-top:8px; padding:8px 10px;
+      border:1px solid #e2e8f0; border-radius:10px;
+      background:#fff; color:#0f172a; font-size:12px;
+    }
+    .stats ul{ margin:0; padding-left:16px; }
+    .stats li{ margin:2px 0; line-height:1.3; }
+
     @media screen and (max-width: 640px) {
       html, body { margin: 0; }
       #gpxFile {width: 200px;}
@@ -148,6 +157,8 @@
         font-size: 16px;        
       }
       .hud .chip{ grid-template-columns:19px 68px minmax(65px, max-content); column-gap:8px; align-items:center; }
+
+      .stats{ font-size:16px; }
     
     }
   </style>
@@ -185,7 +196,16 @@
       <input type="range" id="speedRange" min="0" max="100" step="0.1" value="1" />
       <span class="val"><span id="speedValue">1.0</span>×</span>
     </div>
-  </div>
+
+  </div> <!-- ← 여기서 .control 이 닫힘 -->
+
+      <!-- ▼▼▼ 이동: 통계 패널을 .control 내부로 넣음 ▼▼▼ -->
+    <div id="stats" class="stats" aria-live="polite">
+      <ul id="statsList"></ul>
+    </div>
+    <!-- ▲▲▲ 통계 패널 끝 ▲▲▲ -->
+
+
 
   <div id="map"></div>
 
@@ -233,6 +253,21 @@
       cad: {min:NaN, max:NaN},
       pwr: {min:NaN, max:NaN},
     };
+
+    /* === 배속 컨트롤 설정: 여기만 바꾸면 됩니다 =================== */
+    const SPEED_CFG = {
+      min: 0.2,           // 최소 배속
+      max: 100.0,           // 최대 배속
+      step: 0.1,          // 기본 스텝(슬라이더 step도 이 값으로 맞춤)
+      wheel: {
+        normal: 1,        // 휠 기본 배율(= step × 1)
+        shift: 10,         // Shift 누르고 휠: 빠르게(×5)
+        alt: 0.25         // Alt 누르고 휠: 미세(×0.25)
+      },
+      resetOnDblClick: 1.0 // 슬라이더 더블클릭 시 초기 배속
+    };
+    /* ============================================================ */
+
 
 
     // ───────── 지도 초기화 ─────────
@@ -295,6 +330,24 @@
       speedValue.textContent = speed.toFixed(1);
     });
 
+    // ▼▼▼ (신규) 설정값을 슬라이더 속성에 반영
+    if (speedRange) {
+      speedRange.min  = String(SPEED_CFG.min);
+      speedRange.max  = String(SPEED_CFG.max);
+      speedRange.step = String(SPEED_CFG.step);
+
+      // 초기값 없거나 범위를 벗어나면 기본배속으로 세팅
+      const prec = (SPEED_CFG.step.toString().split('.')[1] || '').length;
+      const init = Math.min(SPEED_CFG.max, Math.max(SPEED_CFG.min, SPEED_CFG.resetOnDblClick));
+      if (!speedRange.value) speedRange.value = init.toFixed(prec);
+      if (speedValue) speedValue.textContent = speedRange.value;
+    }
+    // ▲▲▲ 설정 반영 끝
+
+    // (변경) 휠·더블클릭 제스처 활성화
+    attachWheelToRange(speedRange, SPEED_CFG);
+ 
+
     // 파일 로드
     document.getElementById('gpxFile').addEventListener('change',(e)=>{
       const file = e.target.files?.[0];
@@ -321,6 +374,7 @@
 
         // ★ 추가: 초기 그리기(단색)
         buildGradientRoute('mono');
+        renderStats(computeStats(distPts));
 
 
         // 오버뷰 라인
@@ -653,16 +707,18 @@
           const eleEl  = pt.getElementsByTagName("ele")[0];
           const ele    = eleEl ? parseFloat(eleEl.textContent.trim()) : NaN;
 
-          const hr  = firstNumber(pt, ["hr","gpxtpx:hr","ns3:hr"]);
-          const cad = firstNumber(pt, ["cad","cadence","gpxtpx:cad","ns3:cad"]);
-          const pwr = firstNumber(pt, ["power","Power","gpxtpx:power","ns3:power","watts","ns3:watts"]);
+          const hr  = pickNumber(pt, ["gpxtpx:hr","hr","ns3:hr"]);
+          const cad = pickNumber(pt, ["gpxtpx:cad","cadence","cad","ns3:cad"]);
+          const pwr = pickNumber(pt, ["gpxtpx:power","power","watts","ns3:power","ns3:watts"]);
+          const tmp = pickNumber(pt, ["gpxtpx:atemp","atemp","temp"]); // 섭씨
 
-          // ★ 추가: speed(m/s) → km/h로 변환하여 보관
-          const spdRaw = firstNumber(pt, ["speed","gpxtpx:speed","ns3:speed"]); // 보통 m/s
+          // speed는 m/s → km/h
+          const spdRaw = pickNumber(pt, ["gpxtpx:speed","speed","ns3:speed"]);
           const spdKmh = isFinite(spdRaw) ? spdRaw * 3.6 : NaN;
+          // ▲▲▲ 교정 끝 ▲▲▲
 
           // ★ 원본 인덱스를 보존해 시간 모드에서 누적거리 계산에 사용
-          out.push({ lat,lng,timeMs,ele,hr,cad,pwr, spdKmh, idx: out.length });
+          out.push({ lat,lng,timeMs,ele,hr,cad,pwr,tmp, spdKmh, idx: out.length });
         }
       }catch(e){ console.warn("[GPX] 파싱 실패:", e); }
       return out;
@@ -737,6 +793,101 @@
       currentIndex = i; // 인덱스 갱신
     }
 
+    function computeStats(pts){
+      const HR_MIN=30, CAD_MIN=5;
+
+      // --- HR / CAD / TMP ---
+      const hrArr  = pts.map(p=>p.hr ).filter(v=>Number.isFinite(v) && v>=HR_MIN);
+      const cadArr = pts.map(p=>p.cad).filter(v=>Number.isFinite(v) && v>=CAD_MIN);
+      const tmpArr = pts.map(p=>p.tmp).filter(Number.isFinite);
+
+      // --- 속도(시간가중 평균) ---
+      let dtSum=0, spdDtSum=0, spdMax=NaN;
+      for (let i=1;i<pts.length;i++){
+        const a=pts[i-1], b=pts[i];
+        const dt=(b.timeMs - a.timeMs)/1000;
+        if (!Number.isFinite(dt) || dt<=0) continue;
+        const d = L.latLng(a.lat,a.lng).distanceTo(L.latLng(b.lat,b.lng));
+        const v = (d/dt)*3.6; // km/h
+        dtSum += dt; spdDtSum += v*dt;
+        if (!Number.isFinite(spdMax) || v>spdMax) spdMax=v;
+      }
+      const spdAvg = dtSum>0 ? (spdDtSum/dtSum) : NaN;
+
+      // --- 파워(있을 때만) ---
+      const pwrArr = pts.map(p=>p.pwr).filter(Number.isFinite);
+
+      return {
+        hrAvg : avg(hrArr),  hrMax : max(hrArr),
+        cadAvg: avg(cadArr), cadMax: max(cadArr),
+        spdAvg: spdAvg,      spdMax: spdMax,
+        pwrAvg: avg(pwrArr), pwrMax: max(pwrArr),
+        tmpAvg: avg(tmpArr), tmpMax: max(tmpArr),
+      };
+
+      function avg(a){ return a.length? (a.reduce((s,v)=>s+v,0)/a.length) : NaN; }
+      function max(a){ return a.length? Math.max(...a) : NaN; }
+    }
+
+    function renderStats(s){
+      const $ = (id)=>document.getElementById(id);
+      const fmt = (v,d=1)=> Number.isFinite(v)? v.toFixed(d) : "—";
+      const ul = $("statsList");
+      if (!ul) return;
+      ul.innerHTML = [
+        `HR 평균: ${fmt(s.hrAvg)}, 최대: ${fmt(s.hrMax,0)}`,
+        `CAD 평균: ${fmt(s.cadAvg)}, 최대: ${fmt(s.cadMax,0)}`,
+        `SPD 평균: ${fmt(s.spdAvg)}, 최대: ${fmt(s.spdMax,1)}`,
+        `PWR 평균: ${fmt(s.pwrAvg)}, 최대: ${fmt(s.pwrMax,0)}`,
+        `TMP 평균: ${fmt(s.tmpAvg)}, 최대: ${fmt(s.tmpMax,0)}`
+      ].map(t=>`<li>• ${t}</li>`).join("");
+    }
+
+
+    // ▼▼▼ (신규) 배속 슬라이더 휠 조작 함수
+    // ▼▼▼ (교체/확장) 휠 조작 + 더블클릭 리셋 지원
+    function attachWheelToRange(input, cfg = SPEED_CFG){
+      if (!input) return;
+
+      const stepPrec = (cfg.step.toString().split('.')[1] || '').length;
+
+      // 휠로 배속 증감
+      input.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const dir  = (e.deltaY < 0) ? +1 : -1; // 위로: 증가, 아래: 감소
+        const mult = e.shiftKey ? cfg.wheel.shift
+                  : (e.altKey ? cfg.wheel.alt : cfg.wheel.normal);
+
+        let next = parseFloat(input.value || cfg.resetOnDblClick) + dir * cfg.step * mult;
+
+        // 설정 범위로 클램프
+        next = Math.min(cfg.max, Math.max(cfg.min, next));
+
+        input.value = Number(next).toFixed(stepPrec);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }, { passive: false });
+
+      // 더블클릭으로 기본 배속 복구
+      input.addEventListener('dblclick', () => {
+        const base = Math.min(cfg.max, Math.max(cfg.min, cfg.resetOnDblClick));
+        input.value = Number(base).toFixed(stepPrec);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    }
+    // ▲▲▲ 유틸 끝
+
+    const wrap = document.querySelector('.slider-wrap');
+    if (wrap && speedRange) {
+      wrap.addEventListener('wheel', (e) => {
+        // wrap에서 휠을 돌려도 슬라이더 로직이 실행되게 위임
+        speedRange.dispatchEvent(new WheelEvent('wheel', e));
+      }, { passive: false });
+    }
+
+
+
 
     
 
@@ -786,14 +937,24 @@
     function clamp(v,min,max){ return Math.max(min, Math.min(max,v)); }
     function lerpNum(a,b,t){ const A=Number(a), B=Number(b); if (isFinite(A)&&isFinite(B)) return A+(B-A)*t; if (isFinite(A)) return A; if (isFinite(B)) return B; return NaN; }
     function segmentKmh(a,b){ const dt=(b.timeMs-a.timeMs)/1000; if (!isFinite(dt)||dt<=0) return NaN; const d=L.latLng(a.lat,a.lng).distanceTo(L.latLng(b.lat,b.lng)); return (d/dt)*3.6; }
-    function firstNumber(el,names){
-      for (const n of names){ /* 생략 */ }
-      // ★ 네임스페이스/대소문자 상관없이 <…:speed>도 잡히도록 보강
-      const candidates=new Set(["speed","hr","cad","cadence","power","watts"]);
-      const all=el.getElementsByTagName("*");
-      for (let i=0;i<all.length;i++){
-        const node=all[i]; const local=(node.localName||node.nodeName||"").toLowerCase();
-        if (candidates.has(local)){ const v=parseFloat(node.textContent.trim()); if (isFinite(v)) return v; }
+
+    // ✅ (신규) 원하는 태그만 정확히 찾는 도우미
+    function pickNumber(scope, names){
+      // names: 우선순위 배열. 'gpxtpx:hr' 처럼 namespace 기입 가능
+      const getLocal = (tag) => (tag && (tag.localName || tag.nodeName||"")).toLowerCase().split(":").pop();
+
+      // 1) 각 이름을 우선순위대로 시도
+      for (const name of names){
+        const want = name.toLowerCase().split(":").pop(); // 'hr','cad' 등
+        // 1-1) 전역 탐색 (namespace 상관없이 localName 일치)
+        const all = scope.getElementsByTagName("*");
+        for (let i=0;i<all.length;i++){
+          const node = all[i];
+          if (getLocal(node) === want) {
+            const v = parseFloat((node.textContent||"").trim());
+            if (Number.isFinite(v)) return v;
+          }
+        }
       }
       return NaN;
     }
