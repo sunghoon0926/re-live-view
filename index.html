@@ -304,6 +304,7 @@
               <!-- ★ 추가: 누적거리 (파워와 현재시각 사이) -->
               <span class="chip"><span>📏</span><span class="label">누적거리</span><span class="val" id="hudDist">0.00 km</span></span> <!-- ★ 변경 -->
               <span class="chip"><span>🕒</span><span class="label">현재시각</span><span class="val" id="hudTime">—</span></span>
+              <span class="chip"><span>🌡️</span><span class="label">기온</span><span class="val" id="hudTmp">—</span></span>
             </div>`
     });
 
@@ -632,6 +633,7 @@
       const hr   = lerpNum(a.hrS  ?? a.hr,  b.hrS  ?? b.hr,  segT);
       const cad  = lerpNum(a.cadS ?? a.cad, b.cadS ?? b.cad, segT);
       const pwr  = lerpNum(a.pwrS ?? a.pwr, b.pwrS ?? b.pwr, segT);
+      const tmpC = lerpNum(a.tmp, b.tmp, segT);
 
       // ▶ 속도: 스무딩 spdS → 세그먼트 → 태그평균 폴백
       let spd = lerpNum(a.spdS, b.spdS, segT);
@@ -644,7 +646,7 @@
       }
 
       const timeTxt = isFinite(currentAbsMs) ? msToClock(currentAbsMs) : "—";
-      updateHud(spd, hr, elev, cad, pwr, timeTxt, distMetersNow);
+      updateHud(spd, hr, elev, cad, pwr, tmpC, timeTxt, distMetersNow);
 
       if (isFinite(currentAbsMs)) lastAbsMs = currentAbsMs;
 
@@ -901,15 +903,27 @@
       return { pts:valid, t0, tEnd, totalMs:Math.max(1, tEnd - t0), tArr:valid.map(p=>p.timeMs), elapsed:0 };
     }
 
-    function updateHud(spdKmh, hr, ele, cad, pwr, timeText, distMeters){
-      const $=(id)=>document.getElementById(id);
-      const fmt=(v,u,d=0)=> (isFinite(v) ? (v.toFixed(d)+u) : "—");
-      const speedTxt = fmt(spdKmh,"km/h",1);
-      const hrTxt    = isFinite(hr)  ? Math.round(hr)  + " bpm" : "—";
-      const eleTxt   = isFinite(ele) ? Math.round(ele) + " m"   : "—";
-      const cadTxt   = isFinite(cad) ? Math.round(cad) + " rpm" : "—";
-      const pwrTxt   = isFinite(pwr) ? Math.round(pwr) + " W"   : "—";
-      const distTxt  = isFinite(distMeters) ? (distMeters/1000).toFixed(2) + " km" : "—"; // ★ 변경
+    // ================= HUD 업데이트 =================
+    function updateHud(
+      spdKmh,    // km/h
+      hr,        // bpm
+      ele,       // m
+      cad,       // rpm
+      pwr,       // W
+      tmpC = NaN, // ℃  ← 신규: 기본값으로 안전하게
+      timeText,
+      distMeters
+    ){
+      const $   = (id)=>document.getElementById(id);
+      const fmt = (v,u,d=0)=> (Number.isFinite(v) ? v.toFixed(d)+u : "—");
+
+      const speedTxt = fmt(spdKmh, "km/h", 1);
+      const hrTxt    = Number.isFinite(hr)  ? Math.round(hr)  + " bpm" : "—";
+      const eleTxt   = Number.isFinite(ele) ? Math.round(ele) + " m"   : "—";
+      const cadTxt   = Number.isFinite(cad) ? Math.round(cad) + " rpm" : "—";
+      const pwrTxt   = Number.isFinite(pwr) ? Math.round(pwr) + " W"   : "—";
+      const tmpTxt   = Number.isFinite(tmpC)? Math.round(tmpC)+ " °C"  : "—";
+      const distTxt  = Number.isFinite(distMeters) ? (distMeters/1000).toFixed(2) + " km" : "—";
 
       const hs=$("hudSpd");  if (hs && hs.textContent!==speedTxt) hs.textContent=speedTxt;
       const ht=$("hudTime"); if (ht && ht.textContent!==timeText) ht.textContent=timeText;
@@ -917,9 +931,10 @@
       const he=$("hudEle");  if (he && he.textContent!==eleTxt)  he.textContent=eleTxt;
       const hc=$("hudCad");  if (hc && hc.textContent!==cadTxt)  hc.textContent=cadTxt;
       const hp=$("hudPwr");  if (hp && hp.textContent!==pwrTxt)  hp.textContent=pwrTxt;
-      const hd=$("hudDist"); if (hd && hd.textContent!==distTxt) hd.textContent=distTxt; // ★ 변경
+      const hd=$("hudDist"); if (hd && hd.textContent!==distTxt) hd.textContent=distTxt;
+      const ht2=$("hudTmp"); if (ht2 && ht2.textContent!==tmpTxt) ht2.textContent=tmpTxt;
     }
-
+    // ================= HUD 업데이트 끝 =================
     function msToClock(ms){
       const d = new Date(ms);
       const hh = d.getHours().toString().padStart(2,'0');
@@ -1011,6 +1026,7 @@
         }
         return out;
       }
+
       function movingMean(arr, w=7){
         const n=arr.length, out=new Array(n).fill(NaN);
         const k=Math.floor(w/2);
@@ -1086,6 +1102,10 @@
       const eleSm = movingMean(medianFilter(eleRaw, 31), 5);
       const spdSm = movingMean(medianFilter(spdArr, 9), 7);
       const pwrSm = movingMean(pwrRaw, 5);
+
+      const tmpRaw = pts.map(p=>p.tmp);
+      const tmpSm  = movingMean(medianFilter(tmpRaw,5), 7);
+      for (let i=0;i<pts.length;i++) pts[i].tmpS = tmpSm[i];
 
       for (let i=0;i<n;i++){
         const p=pts[i];
